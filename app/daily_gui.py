@@ -13,7 +13,7 @@ import io
 import json
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
@@ -269,6 +269,23 @@ class DailyController:
         out.sort(key=lambda x: x[0])
         return out
 
+    def load_entries_between(self, passphrase: str, start: date, end: date, category: str) -> List[tuple[date, str, str]]:
+        """Return [(date, HH:MM, text), ...] for date range inclusive."""
+        if not passphrase:
+            raise ValueError("Password is required to view entries.")
+        if category not in ("A", "B"):
+            raise ValueError("Unknown category.")
+        if end < start:
+            start, end = end, start
+
+        rows: List[tuple[date, str, str]] = []
+        d = start
+        while d <= end:
+            for hhmm, text in self.load_entries_for(passphrase, d, category):
+                rows.append((d, hhmm, text))
+            d += timedelta(days=1)
+        return rows
+
 
 # --------------------------
 # GUI (Tk)
@@ -362,13 +379,18 @@ class DailyApp(tk.Tk):
     def _build_viewer_tab(self):
         frm = self.tab_viewer
 
-        # Date picker top bar
+        # Date range top bar
         top = ttk.Frame(frm)
         top.pack(fill=tk.X, padx=12, pady=10)
-        ttk.Label(top, text="Select date:").pack(side=tk.LEFT)
-        self.date_picker = DateEntry(top, date_pattern="yyyy-mm-dd")
-        self.date_picker.set_date(date.today())
-        self.date_picker.pack(side=tk.LEFT, padx=8)
+        ttk.Label(top, text="Start:").pack(side=tk.LEFT)
+        self.date_start = DateEntry(top, date_pattern="yyyy-mm-dd")
+        self.date_start.set_date(date.today())
+        self.date_start.pack(side=tk.LEFT, padx=(6, 12))
+
+        ttk.Label(top, text="End:").pack(side=tk.LEFT)
+        self.date_end = DateEntry(top, date_pattern="yyyy-mm-dd")
+        self.date_end.set_date(date.today())
+        self.date_end.pack(side=tk.LEFT, padx=(6, 12))
 
         # ----- Viewer A -----
         rowA = ttk.Frame(frm)
@@ -431,7 +453,9 @@ class DailyApp(tk.Tk):
             messagebox.showinfo("Password needed", "Enter your encryption password on the Password tab.")
             return
 
-        target_date = self.date_picker.get_date()
+        start_date = self.date_start.get_date()
+        end_date = self.date_end.get_date()
+        
         target_view = self.viewer_A if category == "A" else self.viewer_B
         target_status = self.status_view_A if category == "A" else self.status_view_B
 
@@ -441,17 +465,20 @@ class DailyApp(tk.Tk):
         self.update_idletasks()
 
         try:
-            rows = self.ctrl.load_entries_for(pw, target_date, category)
+            rows = self.ctrl.load_entries_between(pw, start_date, end_date, category)
             if not rows:
-                target_status.set("No entries for that date.")
+                target_status.set("No entries for that range.")
                 target_view.config(state=tk.DISABLED)
                 return
 
-            for hhmm, text in rows:
-                target_view.insert(tk.END, f"[{hhmm}] {text}\n\n")
+            # Show as: YYYY-MM-DD [HH:MM] text
+            for d, hhmm, text in rows:
+                target_view.insert(tk.END, f"{d.isoformat()} [{hhmm}] {text}\n\n")
 
             target_view.config(state=tk.DISABLED)
-            target_status.set(f"Loaded {len(rows)} entr{'y' if len(rows)==1 else 'ies'} for {category}.")
+            day_count = (max(start_date, end_date) - min(start_date, end_date)).days + 1
+            target_status.set(f"Loaded {len(rows)} entr{'y' if len(rows)==1 else 'ies'} for {category} across {day_count} day{'s' if day_count!=1 else ''}.")
+
         except RuntimeError as e:
             target_status.set(str(e))
             target_view.config(state=tk.DISABLED)
