@@ -38,6 +38,9 @@ from nacl import secret, utils
 from nacl.pwhash import argon2id
 
 
+log = logging.getLogger("daily")
+logging.basicConfig(level=logging.INFO)
+
 # --------------------------
 # Config
 # --------------------------
@@ -243,7 +246,12 @@ class DailyController:
         out: List[tuple[str, str]] = []
         for f in files:
             blob = self.drive.download(f["id"])
-            obj = self.crypto.decrypt_blob(passphrase, blob)
+            try:
+                obj = self.crypto.decrypt_blob(passphrase, blob)
+            except Exception as e:
+                log.warning("Failed to decrypt %s: %s", f["name"], e)
+                continue
+
 
             items = obj["entries"] if isinstance(obj, dict) and isinstance(obj.get("entries"), list) else [obj]
             for it in items:
@@ -266,8 +274,7 @@ class DailyController:
 # GUI (Tk)
 # --------------------------
 
-log = logging.getLogger("daily")
-logging.basicConfig(level=logging.INFO)
+
 
 class DailyApp(tk.Tk):
     def __init__(self, controller: DailyController):
